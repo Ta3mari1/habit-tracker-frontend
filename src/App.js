@@ -5,7 +5,9 @@ import { Flame, Trophy, Plus, Check, X, TrendingUp, Calendar, Star, Award, LogOu
 // In Vercel set:
 // REACT_APP_API_URL = https://habit-tracker-backend-olna.onrender.com
 // (NO /api at end)
-const API_URL = `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api`;
+const API_URL =
+  (process.env.REACT_APP_API_URL || 'http://localhost:5000').replace(/\/$/, '') + '/api';
+
 
 
 export default function HabitTracker() {
@@ -52,7 +54,7 @@ export default function HabitTracker() {
       const token = getToken();
       if (!token) return;
 
-      const response = await fetch(`${API_BASE}/api/auth/me`, {
+      const response = await fetch(`${API_URL}/api/auth/me`, {
         headers: { ...authHeaders() }
       });
 
@@ -78,7 +80,7 @@ export default function HabitTracker() {
       const token = getToken();
       if (!token) return;
 
-      const response = await fetch(`${API_BASE}/api/habits`, {
+      const response = await fetch(`${API_URL}/api/habits`, {
         headers: { ...authHeaders() }
       });
 
@@ -108,7 +110,7 @@ export default function HabitTracker() {
         ? { email: authForm.email, password: authForm.password }
         : { username: authForm.username, email: authForm.email, password: authForm.password };
 
-      const response = await fetch(`${API_BASE}/api/auth/${endpoint}`, {
+      const response = await fetch(`${API_URL}/api/auth/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -157,7 +159,7 @@ export default function HabitTracker() {
     if (!newHabitName.trim()) return;
 
     try {
-      const response = await fetch(`${API_BASE}/api/habits`, {
+      const response = await fetch(`${API_URL}/api/habits`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -183,7 +185,7 @@ export default function HabitTracker() {
 
   const toggleHabitToday = async (habitId) => {
     try {
-      const response = await fetch(`${API_BASE}/api/habits/${habitId}/toggle`, {
+      const response = await fetch(`${API_URL}/api/habits/${habitId}/toggle`, {
         method: 'PUT',
         headers: { ...authHeaders() }
       });
