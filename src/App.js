@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Flame, Trophy, Plus, Check, X, TrendingUp, Calendar, Star, Award, LogOut } from 'lucide-react';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
+// IMPORTANT:
+// In Vercel set:
+// REACT_APP_API_URL = https://habit-tracker-backend-olna.onrender.com
+// (NO /api at end)
+const API_URL = `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api`;
+
 
 export default function HabitTracker() {
   const [user, setUser] = useState(null);
@@ -22,26 +27,46 @@ export default function HabitTracker() {
     password: ''
   });
 
+  const getToken = () => localStorage.getItem('token');
+
+  const authHeaders = () => {
+    const token = getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = getToken();
     if (token) {
       setShowAuthModal(false);
-      loadUserData();
-      loadHabits();
+      loadAll();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const loadAll = async () => {
+    await Promise.allSettled([loadUserData(), loadHabits()]);
+  };
 
   const loadUserData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/auth/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const token = getToken();
+      if (!token) return;
+
+      const response = await fetch(`${API_BASE}/api/auth/me`, {
+        headers: { ...authHeaders() }
       });
+
       const data = await response.json();
-      if (data.success) {
-        setUser(data.data);
-        setTotalPoints(data.data.totalPoints);
-        setBadges(data.data.badges || []);
+
+      if (response.ok && data.success) {
+        const u = data.data;
+        setUser(u);
+        setTotalPoints(u.totalPoints || 0);
+        setBadges(u.badges || []);
+      } else {
+        if (response.status === 401) {
+          handleLogout();
+        }
       }
     } catch (err) {
       console.error('Load user error:', err);
@@ -50,13 +75,21 @@ export default function HabitTracker() {
 
   const loadHabits = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/habits`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const token = getToken();
+      if (!token) return;
+
+      const response = await fetch(`${API_BASE}/api/habits`, {
+        headers: { ...authHeaders() }
       });
+
       const data = await response.json();
-      if (data.success) {
-        setHabits(data.data);
+
+      if (response.ok && data.success) {
+        setHabits(data.data || []);
+      } else {
+        if (response.status === 401) {
+          handleLogout();
+        }
       }
     } catch (err) {
       console.error('Load habits error:', err);
@@ -70,11 +103,12 @@ export default function HabitTracker() {
 
     try {
       const endpoint = isLogin ? 'login' : 'register';
+
       const body = isLogin
         ? { email: authForm.email, password: authForm.password }
-        : authForm;
+        : { username: authForm.username, email: authForm.email, password: authForm.password };
 
-      const response = await fetch(`${API_URL}/auth/${endpoint}`, {
+      const response = await fetch(`${API_BASE}/api/auth/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -82,15 +116,28 @@ export default function HabitTracker() {
 
       const data = await response.json();
 
-      if (data.success) {
-        localStorage.setItem('token', data.data.token);
-        setUser(data.data);
+      if (response.ok && data.success) {
+        const token = data?.data?.token;
+        if (token) localStorage.setItem('token', token);
+
+        // If backend returns user fields, set them quickly
+        setUser({
+          id: data.data.id,
+          username: data.data.username,
+          email: data.data.email,
+          totalPoints: data.data.totalPoints,
+          badges: data.data.badges || []
+        });
+
         setShowAuthModal(false);
-        loadHabits();
+
+        // Load fresh data from /me + habits
+        await loadAll();
       } else {
         setError(data.message || 'Authentication failed');
       }
     } catch (err) {
+      console.error(err);
       setError('Server error. Please try again.');
     } finally {
       setLoading(false);
@@ -101,6 +148,8 @@ export default function HabitTracker() {
     localStorage.removeItem('token');
     setUser(null);
     setHabits([]);
+    setBadges([]);
+    setTotalPoints(0);
     setShowAuthModal(true);
   };
 
@@ -108,52 +157,62 @@ export default function HabitTracker() {
     if (!newHabitName.trim()) return;
 
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/habits`, {
+      const response = await fetch(`${API_BASE}/api/habits`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          ...authHeaders()
         },
-        body: JSON.stringify({ name: newHabitName, category: newHabitCategory })
+        body: JSON.stringify({ name: newHabitName.trim(), category: newHabitCategory })
       });
 
       const data = await response.json();
-      if (data.success) {
-        setHabits([...habits, data.data]);
+
+      if (response.ok && data.success) {
         setNewHabitName('');
         setShowAddModal(false);
-        loadUserData();
+        await loadAll();
+      } else {
+        setError(data.message || 'Failed to create habit');
       }
     } catch (err) {
       console.error('Add habit error:', err);
+      setError('Failed to create habit');
     }
   };
 
   const toggleHabitToday = async (habitId) => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/habits/${habitId}/toggle`, {
+      const response = await fetch(`${API_BASE}/api/habits/${habitId}/toggle`, {
         method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { ...authHeaders() }
       });
 
       const data = await response.json();
-      if (data.success) {
-        setHabits(habits.map(h => h._id === habitId ? data.data : h));
-        loadUserData();
-        if (data.newBadges && data.newBadges.length > 0) {
-          setBadges([...badges, ...data.newBadges]);
+
+      if (response.ok && data.success) {
+        // Update that habit locally
+        setHabits((prev) => prev.map((h) => (h._id === habitId ? data.data : h)));
+
+        // Refresh user points/badges if they changed
+        await loadUserData();
+
+        // If backend returns new badges
+        if (data.newBadges && Array.isArray(data.newBadges) && data.newBadges.length > 0) {
+          setBadges((prev) => [...prev, ...data.newBadges]);
         }
+      } else {
+        setError(data.message || 'Failed to toggle habit');
       }
     } catch (err) {
       console.error('Toggle habit error:', err);
+      setError('Failed to toggle habit');
     }
   };
 
   const isCompletedToday = (habit) => {
     const today = new Date().toISOString().split('T')[0];
-    return habit.completedDates.some(date =>
+    return (habit.completedDates || []).some(date =>
       new Date(date).toISOString().split('T')[0] === today
     );
   };
@@ -179,12 +238,15 @@ export default function HabitTracker() {
   };
 
   const getCompletionRate = (habit) => {
-    const daysSinceCreated = Math.max(1,
-      Math.floor((new Date() - new Date(habit.createdAt)) / (1000 * 60 * 60 * 24)) + 1
+    const createdAt = habit.createdAt ? new Date(habit.createdAt) : new Date();
+    const daysSinceCreated = Math.max(
+      1,
+      Math.floor((new Date() - createdAt) / (1000 * 60 * 60 * 24)) + 1
     );
-    return Math.round((habit.totalCompletions / daysSinceCreated) * 100);
+    return Math.round(((habit.totalCompletions || 0) / daysSinceCreated) * 100);
   };
 
+  // AUTH SCREEN
   if (showAuthModal) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100 flex items-center justify-center p-4">
@@ -270,6 +332,7 @@ export default function HabitTracker() {
     );
   }
 
+  // MAIN APP
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100 p-4">
       <div className="max-w-6xl mx-auto">
@@ -333,7 +396,7 @@ export default function HabitTracker() {
             </h2>
             <div className="flex flex-wrap gap-3">
               {badges.map((badge, idx) => {
-                const badgeInfo = getBadgeInfo(badge.badgeId);
+                const badgeInfo = getBadgeInfo(badge.badgeId || badge);
                 return (
                   <div
                     key={idx}
@@ -378,6 +441,7 @@ export default function HabitTracker() {
                         {habit.category}
                       </span>
                     </div>
+
                     <div className="flex items-center gap-4 text-sm text-gray-600">
                       <div className="flex items-center gap-1">
                         <Flame size={16} className="text-orange-500" />
@@ -391,11 +455,12 @@ export default function HabitTracker() {
                       </div>
                     </div>
                   </div>
+
                   <button
                     onClick={() => toggleHabitToday(habit._id)}
                     className={`p-3 rounded-full transition-all ${isCompletedToday(habit)
-                        ? 'bg-green-500 hover:bg-green-600 text-white shadow-lg'
-                        : 'bg-gray-200 hover:bg-gray-300 text-gray-600'
+                      ? 'bg-green-500 hover:bg-green-600 text-white shadow-lg'
+                      : 'bg-gray-200 hover:bg-gray-300 text-gray-600'
                       }`}
                   >
                     {isCompletedToday(habit) ? <Check size={24} /> : <X size={24} />}
@@ -422,15 +487,14 @@ export default function HabitTracker() {
                       const date = new Date();
                       date.setDate(date.getDate() - (6 - i));
                       const dateStr = date.toISOString().split('T')[0];
-                      const completed = habit.completedDates.some(d =>
+                      const completed = (habit.completedDates || []).some(d =>
                         new Date(d).toISOString().split('T')[0] === dateStr
                       );
 
                       return (
                         <div
                           key={i}
-                          className={`flex-1 h-8 rounded ${completed ? 'bg-green-400' : 'bg-gray-200'
-                            }`}
+                          className={`flex-1 h-8 rounded ${completed ? 'bg-green-400' : 'bg-gray-200'}`}
                           title={dateStr}
                         />
                       );
@@ -448,9 +512,7 @@ export default function HabitTracker() {
               <h2 className="text-2xl font-bold text-gray-800 mb-4">Add New Habit</h2>
 
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Habit Name
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Habit Name</label>
                 <input
                   type="text"
                   value={newHabitName}
@@ -461,9 +523,7 @@ export default function HabitTracker() {
               </div>
 
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Category
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
                 <select
                   value={newHabitCategory}
                   onChange={(e) => setNewHabitCategory(e.target.value)}
